@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>声劇台本置き場 ふりがな振り分け機</title>
+<style>
+:root{--bg:#fafafa;--fg:#222;--mut:#666;--card:#fff;--bd:#ddd;--ac:#2e7d6b}
+@media(prefers-color-scheme:dark){:root{--bg:#18191b;--fg:#eee;--mut:#aaa;--card:#232426;--bd:#444;--ac:#5fc2ab}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 "Hiragino Sans","Yu Gothic",sans-serif}
+main{max-width:860px;margin:0 auto;padding:16px}
+h1{font-size:1.3em;margin:.2em 0}h2{font-size:1.05em;margin:0 0 .5em}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin:12px 0}
+.mut{color:var(--mut);font-size:.88em}
+button,select{font:inherit;padding:.4em .9em;border-radius:8px;border:1px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer}
+button.sub{background:transparent;color:var(--ac)}button:disabled{opacity:.4;cursor:default}
+textarea{width:100%;min-height:140px;font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:8px}
+select{background:var(--card);color:var(--fg);border-color:var(--bd)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.prev{max-height:360px;overflow:auto;line-height:2.4;white-space:pre-wrap;border:1px solid var(--bd);border-radius:8px;padding:8px}
+.prev rt{font-size:.5em;color:var(--mut)}.prev .word{margin:.3em 0}
+.tbl{max-height:320px;overflow:auto}table{border-collapse:collapse;width:100%}
+td,th{border-bottom:1px solid var(--bd);padding:3px 6px;text-align:left}
+td input{width:100%;font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--bd);border-radius:6px;padding:2px 6px}
+</style>
+</head>
+<body>
+<main>
+<h1>声劇台本置き場 ふりがな振り分け機</h1>
+<p class="mut">サイトの台本ページを「名前を付けて保存 → MHT」で保存したファイル、または台本の文章に、漢字へふりがなを付けます。形態素解析(kuromoji)で読みを推定し、間違いは下の表や固定読みで直せます。</p>
+<div id="status" class="card mut">辞書を読み込み中…(約17MB・初回のみ)</div>
+
+<div class="card">
+  <h2>① 変換する対象</h2>
+  <div class="row">
+    <label><input type="radio" name="mode" value="mht" checked> MHTファイル</label>
+    <label><input type="radio" name="mode" value="text"> テキスト貼り付け</label>
+  </div>
+  <div id="mhtBox">
+    <input type="file" id="file" accept=".mht,.mhtml">
+    <p class="mut">台本本文(#script-body)のセリフとト書きだけにルビを付け、画像やCSSなど他の部分はそのまま残します。</p>
+  </div>
+  <div id="textBox" hidden>
+    <textarea id="src" placeholder="ここに台本の文章を貼り付け"></textarea>
+    <div class="row">出力形式:
+      <select id="fmt">
+        <option value="kakko">漢字《よみ》</option>
+        <option value="paren">漢字（よみ）</option>
+        <option value="ruby">HTML ruby タグ</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>② 固定読み(任意)</h2>
+  <p class="mut">1行に「語=よみ」。ここに書いた語は解析結果より優先されます。ブラウザに保存されます。</p>
+  <textarea id="dict" style="min-height:90px"></textarea>
+</div>
+
+<div class="card">
+  <h2>②' AIモデル(常時使用・ブラウザ内で動作・APIキー不要)</h2>
+  <p class="mut">ページを開くとAI(WebLLM)が自動で起動し、すべての変換でAIが文脈から読みを付けます。PC版のChrome/Edge(WebGPU対応)で動きます。初回だけモデル(約1〜2.5GB)をダウンロードし、以後は端末に保存されます。台本は外部に送信されません。</p>
+  <div class="row">
+    <select id="model">
+      <option value="Qwen2.5-3B-Instruct-q4f16_1-MLC">Qwen2.5 3B(おすすめ・日本語に強い)</option>
+      <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen2.5 1.5B(軽量)</option>
+      <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B</option>
+    </select>
+  </div>
+</div>
+
+<div class="row">
+  <button id="go" disabled>変換する</button>
+  <button id="dl" class="sub" disabled>MHTをダウンロード</button>
+</div>
+
+<div class="card" id="outCard" hidden>
+  <h2>③ 結果</h2>
+  <div id="textOut" hidden><textarea id="out"></textarea>
+    <div class="row"><button id="copy" class="sub">コピー</button></div></div>
+  <div class="prev" id="prev"></div>
+</div>
+
+<div class="card" id="tblCard" hidden>
+  <h2>④ 読みの確認・修正</h2>
+  <p class="mut">読みを直すと固定読みに登録されます。直したら「変換する」を押し直してください。</p>
+  <div class="tbl"><table><thead><tr><th>語</th><th>読み</th><th>回数</th></tr></thead><tbody id="rows"></tbody></table></div>
+</div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>
+<script>
+// ---------- 基本ユーティリティ ----------
+const DIC_PATH = 'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/';
+const K = '\\u4e00-\\u9fff々〆';                       // 漢字の文字クラス
+const hasKanji = s => new RegExp('[' + K + ']').test(s);
+const kata2hira = s => s.replace(/[\u30a1-\u30f6]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const _ta = document.createElement('textarea');
+const unesc = s => { _ta.innerHTML = s; return _ta.value; };
+const $ = id => document.getElementById(id);
+
+// このサイト(Nuxt製)の台本ページ用: ルビの見た目を整えるCSS
+const SITE_STYLE = '<style id="furi-style">#script-body ruby rt{font-size:.5em;line-height:1;color:#555}#script-body .word-text{line-height:2.4}</style>';
+
+let tokenizer = null, mhtBytes = null, mhtName = 'script.mht', outBytes = null;
+let userDict = {}, dictRe = null, seen = new Map();
+
+// ---------- 辞書の読み込み ----------
+kuromoji.builder({ dicPath: DIC_PATH }).build((err, t) => {
+  if (err) { $('status').textContent = '辞書の読み込みに失敗しました。ネットワークを確認して再読み込みしてください。'; return; }
+  tokenizer = t;
+  startAI();
+});
+
+// ---------- 固定読み ----------
+function loadDict() {
+  let saved = '';
+  try { saved = localStorage.getItem('furiDict') || ''; } catch (e) {}
+  $('dict').value = saved || '右大臣=うだいじん\n市場=いちば\n私=わたし';
+}
+function parseDict() {
+  userDict = {};
+  $('dict').value.split('\n').forEach(l => {
+    const i = l.indexOf('=');
+    if (i > 0 && l.slice(i + 1).trim()) userDict[l.slice(0, i).trim()] = l.slice(i + 1).trim();
+  });
+  const keys = Object.keys(userDict).sort((a, b) => b.length - a.length);
+  dictRe = keys.length ? new RegExp(keys.map(reEsc).join('|'), 'g') : null;   // 長い語を優先
+  try { localStorage.setItem('furiDict', $('dict').value); } catch (e) {}
+}
+function setDictEntry(word, reading) {
+  parseDict();
+  if (reading) userDict[word] = reading; else delete userDict[word];
+  $('dict').value = Object.entries(userDict).map(([k, v]) => k + '=' + v).join('\n');
+  parseDict();
+}
+
+// ---------- ふりがな付与の本体 ----------
+// 表層形を「漢字の連続」と「かなの連続」に分け、かなを目印に読みを割り当てる(送り仮名を除外)
+function align(surface, read) {
+  const runs = surface.match(new RegExp('[' + K + ']+|[^' + K + ']+', 'g')) || [];
+  const pat = '^' + runs.map(r => hasKanji(r[0]) ? '(.+?)' : reEsc(kata2hira(r))).join('') + '$';
+  const m = new RegExp(pat).exec(read);
+  if (!m) return null;
+  let g = 1;
+  return runs.map(r => hasKanji(r[0]) ? { s: r, r: m[g++] } : { s: r, r: null });
+}
+
+function annotate(text) {
+  const out = [];
+  const push = (word, read) => {
+    if (!hasKanji(word) || !read || read === word || hasKanji(read)) { out.push({ s: word, r: null }); return; }
+    const key = word + '\t' + read;
+    seen.set(key, (seen.get(key) || 0) + 1);
+    (align(word, read) || [{ s: word, r: read }]).forEach(x => out.push(x));
+  };
+  const plain = t => {
+    if (!t) return;
+    tokenizer.tokenize(t).forEach(k => push(k.surface_form, k.reading ? kata2hira(k.reading) : null));
+  };
+  let pos = 0;
+  if (dictRe) {
+    for (const m of text.matchAll(dictRe)) {
+      plain(text.slice(pos, m.index));
+      push(m[0], userDict[m[0]]);
+      pos = m.index + m[0].length;
+    }
+  }
+  plain(text.slice(pos));
+  return out;
+}
+
+
+// ---------- AI(Claude API)による読み付け ----------
+const aiCache = new Map();                       // 原文 → segs
+const AI_SYSTEM = 'あなたは日本語の声劇台本に正確なふりがなを付ける専門家です。' +
+  '対象行の漢字すべてに、文脈に合った読みを《ひらがな》で付けてください。参考として辞書による下書きを付けますが、誤りが混じっているので鵜呑みにせず、必ず自分で判断してください。' +
+  'ルール: 原文の文字は一切変更・削除・追加しない(《》の中身を除く)。送り仮名は《》に含めない(例: 考《かんが》える、一人《ふたり》)。' +
+  '読みはひらがなだけ。漢字のない部分に《》を付けない。出力は対象行1行だけで、説明は書かない。';
+
+function parseMarked(marked) {                    // "考《かんが》える" → segs
+  const segs = []; let pos = 0;
+  for (const m of marked.matchAll(new RegExp('([' + K + ']+)《([^》]+)》', 'g'))) {
+    if (m.index > pos) segs.push({ s: marked.slice(pos, m.index), r: null });
+    segs.push({ s: m[1], r: /^[ぁ-ゖー・、]+$/.test(m[2]) ? m[2] : null });
+    pos = m.index + m[0].length;
+  }
+  if (pos < marked.length) segs.push({ s: marked.slice(pos), r: null });
+  return segs;
+}
+
+let aiReady = false;
+async function startAI() {                       // 辞書の準備ができたらAIも自動で起動する
+  aiReady = false; $('go').disabled = true;
+  try { await getEngine(); aiReady = true; $('status').textContent = '準備完了です(AI有効)。'; }
+  catch (e) { $('status').textContent = 'AIを起動できないため、辞書のみで変換します: ' + e.message; }
+  $('go').disabled = false;
+}
+let llm = null;                                   // { engine, id }
+async function getEngine() {
+  const id = $('model').value;
+  if (llm && llm.id === id) return llm.engine;
+  if (!navigator.gpu) throw new Error('このブラウザはWebGPUに未対応です。PC版のChrome/Edgeで開いてください。');
+  const webllm = await import('https://esm.run/@mlc-ai/web-llm');
+  const engine = await webllm.CreateMLCEngine(id, {
+    initProgressCallback: p => { $('status').textContent = 'AIモデルを準備中… ' + p.text; }
+  });
+  llm = { engine, id };
+  return engine;
+}
+
+async function aiAnnotateAll(texts) {
+  const engine = await getEngine();
+  const todo = [...new Set(texts)].filter(t => hasKanji(t) && !aiCache.has(t));
+  const fixed = Object.entries(userDict).map(([k, v]) => k + '=' + v).join('\n');
+  for (let i = 0; i < todo.length; i++) {          // 小型モデルは1行ずつ+直前の行を文脈にして安定させる
+    $('status').textContent = `AIが読みを付けています… ${i + 1}/${todo.length}`;
+    const keep = seen; seen = new Map();            // 下書き作成で統計を汚さない
+    const draft = toKakko(annotate(todo[i]), '《', '》');
+    seen = keep;
+    const prompt = (todo[i - 1] ? '直前の行: ' + todo[i - 1] + '\n' : '') +
+      (fixed ? '固定読み:\n' + fixed + '\n' : '') + '対象行: ' + todo[i] + '\n辞書の下書き: ' + draft;
+    const res = await engine.chat.completions.create({
+      messages: [{ role: 'system', content: AI_SYSTEM }, { role: 'user', content: prompt }],
+      temperature: 0, max_tokens: 1500
+    });
+    const out = (res.choices[0].message.content || '').trim().replace(/^対象行[^:：]*[:：]\s*/, '');
+    const segs = parseMarked(out);
+    if (segs.map(x => x.s).join('') === todo[i]) aiCache.set(todo[i], segs);   // 原文と違えば不採用(下書きのまま)
+  }
+  $('status').textContent = '変換が完了しました。';
+}
+
+// AI結果があれば使い、なければ通常の解析
+function annotateX(text) {
+  const segs = aiCache.get(text);
+  if (!segs) return annotate(text);
+  segs.forEach(x => { if (x.r) { const k = x.s + '\t' + x.r; seen.set(k, (seen.get(k) || 0) + 1); } });
+  return segs.map(x => ({ ...x }));
+}
+
+const toRuby  = segs => segs.map(x => x.r ? `<ruby>${esc(x.s)}<rt>${x.r}</rt></ruby>` : esc(x.s)).join('');
+const toKakko = (segs, o, c) => segs.map(x => x.r ? x.s + o + x.r + c : x.s).join('');
+
+// ---------- MHT変換 ----------
+async function convertMht() {
+  const dec = new TextDecoder('latin1').decode(mhtBytes);      // 1バイト=1文字なので位置がバイト位置と一致
+  const a = dec.indexOf('id="script-body"');
+  const b = dec.indexOf('script-body-end-marker', a);
+  if (a < 0 || b < 0) { alert('台本本文が見つかりません。台本の詳細ページを保存したMHTか確認してください。'); return; }
+  const utf8 = new TextDecoder('utf-8');
+  let pre = utf8.decode(mhtBytes.slice(0, a));
+  if (/quoted-printable/i.test(pre.slice(0, 3000))) { alert('このMHTはquoted-printable形式のため未対応です(Chrome/Edge保存のMHTに対応)。'); return; }
+  if (!pre.includes('id="furi-style"')) pre = pre.replace('</head>', SITE_STYLE + '</head>');
+
+  let mid = utf8.decode(mhtBytes.slice(a, b));
+  // font-size指定のspan = セリフ/ト書き本文。キャラ名やト書きの「――」はこの形ではないので対象外
+  const RE = /(<span[^>]*style="font-size:[^"]*"[^>]*>)([\s\S]*?)(<\/span>)/g;
+  const pass = f => mid.replace(RE, (m, o, t, c) => t.includes('<ruby') ? m   // 変換済みは二重にしない
+    : o + t.split(/(<[^>]*>)/).map(p => p.startsWith('<') ? p : f(unesc(p))).join('') + c);
+  if (aiReady) {
+    const texts = []; pass(t => (texts.push(t), esc(t)));
+    await aiAnnotateAll(texts);
+  }
+  mid = pass(t => toRuby(annotateX(t)));
+
+  const enc = new TextEncoder();
+  const parts = [enc.encode(pre), enc.encode(mid), mhtBytes.slice(b)];
+  outBytes = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let off = 0; parts.forEach(p => { outBytes.set(p, off); off += p.length; });
+
+  $('prev').innerHTML = mid.slice(mid.indexOf('>') + 1);
+  $('textOut').hidden = true;
+  $('dl').disabled = false;
+}
+
+// ---------- テキスト変換 ----------
+async function convertText() {
+  if (aiReady) await aiAnnotateAll($('src').value.split('\n'));
+  const segs = aiReady ? $('src').value.split('\n').flatMap((l, i, a) => [...annotateX(l), ...(i < a.length - 1 ? [{ s: '\n', r: null }] : [])]) : annotate($('src').value);
+  const f = $('fmt').value;
+  $('out').value = f === 'ruby' ? toRuby(segs) : f === 'paren' ? toKakko(segs, '（', '）') : toKakko(segs, '《', '》');
+  $('prev').innerHTML = toRuby(segs);
+  $('textOut').hidden = false;
+}
+
+// ---------- 確認表 ----------
+function renderTable() {
+  const rows = [...seen.entries()].map(([k, n]) => { const [w, r] = k.split('\t'); return { w, r, n }; })
+    .sort((x, y) => y.n - x.n);
+  $('rows').innerHTML = '';
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
+    const inp = document.createElement('input');
+    inp.value = row.r;
+    inp.onchange = () => setDictEntry(row.w, inp.value.trim());
+    tr.innerHTML = `<td>${esc(row.w)}</td><td></td><td>${row.n}</td>`;
+    tr.children[1].appendChild(inp);
+    $('rows').appendChild(tr);
+  });
+  $('tblCard').hidden = !rows.length;
+}
+
+// ---------- イベント ----------
+function mode() { return document.querySelector('input[name=mode]:checked').value; }
+document.querySelectorAll('input[name=mode]').forEach(r => r.onchange = () => {
+  $('mhtBox').hidden = mode() !== 'mht';
+  $('textBox').hidden = mode() !== 'text';
+  $('dl').hidden = mode() !== 'mht';
+});
+$('file').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  mhtName = f.name; mhtBytes = new Uint8Array(await f.arrayBuffer());
+};
+$('go').onclick = async () => {
+  if (!tokenizer) return;
+  if (mode() === 'mht' && !mhtBytes) { alert('MHTファイルを選んでください。'); return; }
+  parseDict(); seen = new Map();
+  $('go').disabled = true;
+  try { mode() === 'mht' ? await convertMht() : await convertText(); }
+  catch (e) { alert(e.message); $('status').textContent = 'エラー: ' + e.message; $('go').disabled = false; return; }
+  $('go').disabled = false;
+  $('outCard').hidden = false;
+  renderTable();
+};
+$('dl').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([outBytes], { type: 'message/rfc822' }));
+  a.download = mhtName.replace(/\.(mht|mhtml)$/i, '') + '_ふりがな付き.mht';
+  a.click();
+};
+$('copy').onclick = () => navigator.clipboard.writeText($('out').value);
+$('dict').onchange = parseDict;
+$('model').onchange = () => { if (tokenizer) startAI(); };
+loadDict();
+</script>
+</body>
+</html>
